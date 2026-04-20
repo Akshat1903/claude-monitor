@@ -9,6 +9,7 @@ final class UsageViewModel: ObservableObject {
     @Published var lastFetchedAt: Date?
     @Published var isLoading = false
     @Published var lastError: String?
+    @Published var rateLimitedUntil: Date?
 
     private let api = APIClient()
     private let store = SharedStore()
@@ -22,12 +23,11 @@ final class UsageViewModel: ObservableObject {
             await refresh()
         }
         startAutoRefresh()
-        observeWakeAndNetwork()
+        observeWake()
     }
 
-    private func observeWakeAndNetwork() {
-        let wake = NSWorkspace.shared.notificationCenter
-        wake.addObserver(
+    private func observeWake() {
+        NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
@@ -43,9 +43,16 @@ final class UsageViewModel: ObservableObject {
             self.summary = UsageSummary(cached.usage)
             self.lastFetchedAt = cached.fetchedAt
         }
+        if let cached = store.readProfile() {
+            self.profile = cached.profile
+        }
     }
 
     func refresh() async {
+        if let until = rateLimitedUntil, until > Date() {
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
 
@@ -55,27 +62,38 @@ final class UsageViewModel: ObservableObject {
         }
 
         do {
-            async let usageT = api.fetchUsage(token: token)
-            async let profileT = try? api.fetchProfile(token: token)
-
-            let usage = try await usageT
-            let profile = await profileT
-
+            let usage = try await api.fetchUsage(token: token)
             let cached = CachedUsage(usage: usage, fetchedAt: Date())
             try store.writeUsage(cached)
 
             let summary = UsageSummary(usage)
             self.summary = summary
-            self.profile = profile
             self.lastFetchedAt = cached.fetchedAt
             self.lastError = nil
+            self.rateLimitedUntil = nil
 
             await NotificationService.shared.checkAndNotify(summary: summary)
+        } catch APIError.rateLimited(let retry) {
+            let wait = retry ?? 300
+            self.rateLimitedUntil = Date().addingTimeInterval(wait)
+            self.lastError = rateLimitErrorMessage(retryAfter: wait)
         } catch {
             lastError = error.localizedDescription
         }
 
+        if let profileResp = try? await api.fetchProfile(token: token) {
+            self.profile = profileResp
+            try? store.writeProfile(CachedProfile(profile: profileResp, fetchedAt: Date()))
+        }
+
         self.stats = await statsService.compute()
+    }
+
+    private func rateLimitErrorMessage(retryAfter: TimeInterval) -> String {
+        let when = Date().addingTimeInterval(retryAfter)
+        let f = DateFormatter()
+        f.timeStyle = .short
+        return "Rate limited by Anthropic · retrying at \(f.string(from: when))"
     }
 
     private func startAutoRefresh() {

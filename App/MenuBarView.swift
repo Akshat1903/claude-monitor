@@ -30,10 +30,12 @@ struct MenuBarView: View {
                              resetsAt: summary.claudeDesignResetsAt,
                              pace: nil)
                 }
-            } else if let err = viewModel.lastError {
-                Text(err).foregroundColor(.red).font(.caption)
-            } else {
+            } else if viewModel.lastError == nil {
                 ProgressView().frame(maxWidth: .infinity)
+            }
+
+            if let err = viewModel.lastError {
+                errorBanner(err)
             }
 
             Divider()
@@ -110,6 +112,23 @@ struct MenuBarView: View {
             Text(label).font(.caption2).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func errorBanner(_ msg: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .font(.caption)
+            Text(msg)
+                .font(.caption)
+                .foregroundColor(.primary.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private var footer: some View {
