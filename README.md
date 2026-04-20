@@ -36,32 +36,40 @@ Under the hood:
 
 ## Build & run
 
-```bash
-brew install xcodegen
+### One-time prep
 
+1. Install Xcode from the Mac App Store (full Xcode, not just CLT). Open it once and accept the license.
+2. Xcode → Settings → Accounts → `+` → Apple ID. Any Apple ID (free is fine) gives you a "Personal Team" for signing.
+3. Install XcodeGen: `brew install xcodegen`
+
+### Clone and build
+
+```bash
 git clone git@github.com:Akshat1903/claude-monitor.git
 cd claude-monitor
+./setup.sh
+```
 
-# Edit project.yml and replace DEVELOPMENT_TEAM with your own Apple Developer Team ID.
-# (Find yours: Xcode > Settings > Accounts > your Apple ID > Personal Team.)
+`setup.sh` does three things:
+- Auto-detects your Apple Developer Team ID from your Keychain
+- Prompts you to pick a unique bundle-ID prefix (defaults to `dev.$USER.claudemonitor`)
+- Patches `project.yml` and regenerates the Xcode project
 
-# You'll also need to pick your own bundle ID prefix — the default `dev.fox.claudewidget`
-# is tied to the original author's cert. Change it to e.g. `dev.<yourname>.claudemonitor`
-# in project.yml (the `bundleIdPrefix` line and the three `PRODUCT_BUNDLE_IDENTIFIER`
-# entries).
+If no signing cert exists yet, the script tells you exactly what to click in Xcode to create one, then just re-run `./setup.sh`.
 
-xcodegen generate
+Once setup is done:
+
+```bash
 xcodebuild -project ClaudeWidget.xcodeproj \
            -scheme ClaudeWidgetApp \
            -configuration Debug \
            -destination 'platform=macOS' \
            build
 
-# Launch the build output (replace the UUID path with whatever xcodebuild printed):
 open ~/Library/Developer/Xcode/DerivedData/ClaudeWidget-*/Build/Products/Debug/ClaudeWidgetApp.app
 ```
 
-On first launch macOS will prompt you to:
+On first launch macOS prompts you to:
 
 1. Allow Keychain access — accept so the app can read the Claude Code credential
 2. Allow notifications — accept to receive 50/80/95% threshold alerts
