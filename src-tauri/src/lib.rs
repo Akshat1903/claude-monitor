@@ -9,7 +9,7 @@ mod types;
 use commands::AppState;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, Rect, Size, WebviewWindow};
+use tauri::{LogicalPosition, Manager, Position, Rect, Size, WebviewWindow};
 
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray@2x.png");
 
