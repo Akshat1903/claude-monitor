@@ -123,49 +123,39 @@ fn set_panel_behavior(win: &WebviewWindow) {
     unsafe {
         // Convert NSWindow → NSPanel. Plain NSWindow cannot reliably overlay fullscreen
         // apps on modern macOS regardless of collectionBehavior/level. NSPanel can.
+        // We deliberately leave `nonactivatingPanel` off so the panel becomes key on show
+        // and loses key when the user clicks elsewhere — that drives our dismiss logic.
         let panel_class: *const objc2::runtime::AnyClass = objc2::class!(NSPanel);
         let raw_obj = ptr as *mut AnyObject;
         objc2::ffi::object_setClass(raw_obj, panel_class.cast());
 
         let ns_window = &*(ptr as *mut NSWindow);
 
-        // Turn on nonactivating panel style mask (bit 7 = NSWindowStyleMask.nonactivatingPanel).
-        let current_mask: usize = objc2::msg_send![ns_window, styleMask];
-        let _: () = objc2::msg_send![ns_window, setStyleMask: current_mask | (1usize << 7)];
-
-        // Appear in every space, including fullscreen.
         let extra = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary;
         ns_window.setCollectionBehavior(extra);
 
-        // Raise above the menu bar and every fullscreen app layer.
         let _: () = objc2::msg_send![ns_window, setLevel: 1000isize];
-
-        let behavior_now: usize = std::mem::transmute(ns_window.collectionBehavior());
-        let level_now: isize = objc2::msg_send![ns_window, level];
-        let mask_now: usize = objc2::msg_send![ns_window, styleMask];
-        eprintln!(
-            "[panel] collectionBehavior=0x{:x} level={} styleMask=0x{:x}",
-            behavior_now, level_now, mask_now
-        );
     }
 }
 
 fn position_under_tray(win: &WebviewWindow, tray_pos: Position) {
+    // Place the popup below the menu bar + tray icon so nothing overlaps the system menu.
+    // Menu bar height is ~24pt on Retina. Using 28pt gives a small gap below the tray.
+    const MENU_BAR_GAP: f64 = 28.0;
     let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(340, 460));
     let scale = win.scale_factor().unwrap_or(1.0);
     match tray_pos {
         Position::Physical(p) => {
             let x = p.x as f64 - (size.width as f64 / 2.0);
-            let y = p.y as f64 + 8.0;
+            let y = MENU_BAR_GAP * scale;
             let _ = win.set_position(PhysicalPosition::new(x, y));
         }
         Position::Logical(p) => {
             let logical_w = size.width as f64 / scale;
             let x = p.x - logical_w / 2.0;
-            let y = p.y + 8.0;
-            let _ = win.set_position(LogicalPosition::new(x, y));
+            let _ = win.set_position(LogicalPosition::new(x, MENU_BAR_GAP));
         }
     }
 }
