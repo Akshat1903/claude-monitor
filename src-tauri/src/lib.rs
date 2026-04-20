@@ -9,7 +9,7 @@ mod types;
 use commands::AppState;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow};
+use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow, WindowEvent};
 
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray@2x.png");
 
@@ -53,6 +53,16 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(300)).await;
                 }
             });
+
+            // Hide the popup when it loses focus (click outside to dismiss).
+            if let Some(win) = app.get_webview_window("main") {
+                let win_for_events = win.clone();
+                win.on_window_event(move |event| {
+                    if let WindowEvent::Focused(false) = event {
+                        let _ = win_for_events.hide();
+                    }
+                });
+            }
 
             Ok(())
         })
