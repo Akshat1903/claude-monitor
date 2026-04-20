@@ -45,13 +45,6 @@
       clockTick++;
     }, 30_000);
 
-    const fetchedAt = snapshot?.fetched_at
-      ? new Date(snapshot.fetched_at).getTime()
-      : 0;
-    if (Date.now() - fetchedAt > 60_000) {
-      refresh();
-    }
-
     onDestroy(() => {
       unlisten();
       if (tickTimer) clearInterval(tickTimer);
