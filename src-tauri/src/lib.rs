@@ -54,14 +54,31 @@ pub fn run() {
                 }
             });
 
-            // Hide the popup when it loses focus (click outside to dismiss).
             if let Some(win) = app.get_webview_window("main") {
+                // Popup follows the user across Spaces *and* appears over full-screen apps.
+                let _ = win.set_visible_on_all_workspaces(true);
+                #[cfg(target_os = "macos")]
+                set_panel_behavior(&win);
+
+                // Hide the popup when it loses focus (click outside to dismiss).
                 let win_for_events = win.clone();
                 win.on_window_event(move |event| {
                     if let WindowEvent::Focused(false) = event {
                         let _ = win_for_events.hide();
                     }
                 });
+            }
+
+            // Seed the tray label from whatever we have cached so it's not blank on launch.
+            if let Some(tray) = app.tray_by_id("main-tray") {
+                let title = {
+                    let g = state.inner.blocking_lock();
+                    g.usage
+                        .as_ref()
+                        .and_then(|u| u.five_hour.as_ref())
+                        .map(|b| format!(" {}%", b.utilization as i64))
+                };
+                let _ = tray.set_title(title);
             }
 
             Ok(())
@@ -84,6 +101,23 @@ fn toggle_window(app: &tauri::AppHandle, tray_pos: Option<Position>) {
         }
         let _ = win.show();
         let _ = win.set_focus();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_panel_behavior(win: &WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    let Ok(ptr) = win.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let ns_window = &*(ptr as *mut NSWindow);
+        let current = ns_window.collectionBehavior();
+        let extra = NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::Stationary;
+        ns_window.setCollectionBehavior(current | extra);
     }
 }
 

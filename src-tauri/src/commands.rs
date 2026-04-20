@@ -114,7 +114,20 @@ pub async fn refresh_impl<R: Runtime>(state: Arc<AppState>, app: AppHandle<R>) {
         g.stats = Some(snap);
     }
 
+    update_tray_title(&app, &state).await;
     let _ = app.emit("snapshot-updated", snapshot_inner(&state).await);
+}
+
+async fn update_tray_title<R: Runtime>(app: &AppHandle<R>, state: &Arc<AppState>) {
+    let Some(tray) = app.tray_by_id("main-tray") else { return };
+    let title = {
+        let g = state.inner.lock().await;
+        g.usage
+            .as_ref()
+            .and_then(|u| u.five_hour.as_ref())
+            .map(|b| format!(" {}%", b.utilization as i64))
+    };
+    let _ = tray.set_title(title);
 }
 
 async fn snapshot_inner(state: &Arc<AppState>) -> AppSnapshot {
