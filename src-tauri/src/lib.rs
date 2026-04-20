@@ -9,7 +9,7 @@ mod types;
 use commands::AppState;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow};
+use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, Rect, Size, WebviewWindow};
 
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray@2x.png");
 
@@ -39,7 +39,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        toggle_window(&app_handle, Some(rect.position));
+                        toggle_window(&app_handle, Some(rect));
                     }
                 })
                 .build(app)?;
@@ -85,13 +85,13 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn toggle_window(app: &tauri::AppHandle, tray_pos: Option<Position>) {
+fn toggle_window(app: &tauri::AppHandle, tray_rect: Option<Rect>) {
     let Some(win) = app.get_webview_window("main") else { return };
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
     } else {
-        if let Some(pos) = tray_pos {
-            position_under_tray(&win, pos);
+        if let Some(rect) = tray_rect {
+            position_under_tray(&win, rect);
         }
         let _ = win.show();
         let _ = win.set_focus();
@@ -166,22 +166,46 @@ fn install_global_click_monitor(win: WebviewWindow) {
     }
 }
 
-fn position_under_tray(win: &WebviewWindow, tray_pos: Position) {
-    // Place the popup below the menu bar + tray icon so nothing overlaps the system menu.
-    // Menu bar height is ~24pt on Retina. Using 28pt gives a small gap below the tray.
-    const MENU_BAR_GAP: f64 = 28.0;
+fn position_under_tray(win: &WebviewWindow, tray_rect: Rect) {
+    // Anchor the popup's top edge just below the tray icon's bottom. Using the tray
+    // rect directly (not a hardcoded Y) is essential for multi-display setups — the
+    // tray's rect is in global screen coords and sits on whichever display the tray
+    // was clicked on.
+    const GAP: f64 = 4.0;
     let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(340, 460));
     let scale = win.scale_factor().unwrap_or(1.0);
-    match tray_pos {
-        Position::Physical(p) => {
-            let x = p.x as f64 - (size.width as f64 / 2.0);
-            let y = MENU_BAR_GAP * scale;
+
+    match (tray_rect.position, tray_rect.size) {
+        (Position::Physical(p), Size::Physical(s)) => {
+            let tray_center_x = p.x as f64 + (s.width as f64) / 2.0;
+            let x = tray_center_x - (size.width as f64 / 2.0);
+            let y = p.y as f64 + s.height as f64 + GAP * scale;
             let _ = win.set_position(PhysicalPosition::new(x, y));
         }
-        Position::Logical(p) => {
+        (Position::Logical(p), Size::Logical(s)) => {
+            let tray_center_x = p.x + s.width / 2.0;
             let logical_w = size.width as f64 / scale;
-            let x = p.x - logical_w / 2.0;
-            let _ = win.set_position(LogicalPosition::new(x, MENU_BAR_GAP));
+            let x = tray_center_x - logical_w / 2.0;
+            let y = p.y + s.height + GAP;
+            let _ = win.set_position(LogicalPosition::new(x, y));
+        }
+        // Mixed variants shouldn't happen, but fall back to centering under the position.
+        _ => {
+            let pos: Position = tray_rect.position;
+            match pos {
+                Position::Physical(p) => {
+                    let _ = win.set_position(PhysicalPosition::new(
+                        p.x as f64 - (size.width as f64 / 2.0),
+                        p.y as f64 + 28.0 * scale,
+                    ));
+                }
+                Position::Logical(p) => {
+                    let _ = win.set_position(LogicalPosition::new(
+                        p.x - (size.width as f64 / scale) / 2.0,
+                        p.y + 28.0,
+                    ));
+                }
+            }
         }
     }
 }
