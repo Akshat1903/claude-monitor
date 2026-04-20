@@ -113,11 +113,17 @@ fn set_panel_behavior(win: &WebviewWindow) {
     }
     unsafe {
         let ns_window = &*(ptr as *mut NSWindow);
+
+        // Spaces behavior: follow the user everywhere, including fullscreen.
         let current = ns_window.collectionBehavior();
         let extra = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary;
         ns_window.setCollectionBehavior(current | extra);
+
+        // Raise above the fullscreen app's layer. NSStatusWindowLevel (25) puts us
+        // alongside the system menu bar, which is the standard altitude for tray popups.
+        let _: () = objc2::msg_send![ns_window, setLevel: 25isize];
     }
 }
 
