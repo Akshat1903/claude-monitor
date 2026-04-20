@@ -63,9 +63,9 @@
 </script>
 
 <main
-  class="p-4 flex flex-col gap-3 rounded-[14px] bg-white/85 dark:bg-zinc-900/85
-         backdrop-blur-xl text-black dark:text-white
-         border border-black/5 dark:border-white/10"
+  class="p-4 flex flex-col gap-3 rounded-[14px] bg-white dark:bg-zinc-900
+         text-black dark:text-white
+         border border-black/10 dark:border-white/10"
 >
   <header class="flex items-center">
     <h1 class="text-sm font-semibold">Claude Usage</h1>
