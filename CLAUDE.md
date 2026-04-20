@@ -1,117 +1,60 @@
-# Claude Widget
+# Claude Monitor
 
-A macOS menu bar app that tracks Claude AI usage limits in real time, built to prevent blowing through the 5-hour and weekly quotas during heavy Claude Code sessions.
+macOS menu bar app that tracks Claude AI usage limits. Menu-bar-only surface: tray icon + small popup window.
 
-Menu-bar only. No desktop widget (was scoped out due to free-Personal-Team App Group cross-sandbox limitations — the menu bar UX is the primary surface anyway).
+## Tech
 
-## Status
+- **Frontend**: Svelte 5 (SvelteKit in SPA mode, `adapter-static`) + TypeScript + Tailwind CSS v4
+- **Backend**: Rust + Tauri v2
+- **Build**: `npm run tauri build` (Vite builds Svelte; Cargo builds Rust; Tauri wraps both into a `.app` bundle)
 
-**v0.2 live** — single menu bar app, signed, runs from Xcode build.
+## Data pipeline
 
-### What works
-- Menu bar icon with live 5-hour %
-- Dropdown showing:
-  - Account name + plan tier (e.g. "Akshat Gupta · Claude Max 5x")
-  - Headline stats tile: Today / Week tokens + favorite model (from local `~/.claude/projects/*.jsonl`)
-  - 5-hour + weekly gauges with pace zones (chill/on-track/hot) and countdown to reset
-  - Claude Design weekly gauge (from `seven_day_omelette`; hidden when API returns null)
-- Manual refresh button + auto-refresh every 5 min
-- macOS notifications at 50/80/95% thresholds (re-arm on window reset)
-- Keychain-based auth via Security framework (no helper needed)
-- Persists: `usage.json` (last cached response), `samples.json` (rolling 6h of % samples) in `~/Library/Application Support/ClaudeWidget/`
+1. **Keychain**: `/usr/bin/security find-generic-password -s "Claude Code-credentials" -w` → extract `claudeAiOauth.accessToken` (shell-out in `src-tauri/src/keychain.rs` — simpler than `security-framework`'s item-search API, and the process isn't sandboxed so it just works)
+2. **API**: `reqwest` hits `GET https://api.anthropic.com/api/oauth/usage` and `/api/oauth/profile` with `Authorization: Bearer <token>` + `anthropic-beta: oauth-2025-04-20`
+3. **Persistence**: `~/Library/Application Support/ClaudeMonitor/{usage,profile,alerts}.json` — hydrates UI across launches so the popup never shows blank when the API is throttled
+4. **Stats**: `walkdir` over `~/.claude/projects/**/*.jsonl`, sums `input + output + cache_creation_input_tokens` per event in the last 7 days, groups by `message.model` → favorite model
+5. **UI**: Svelte renders from `AppSnapshot` returned by the `get_snapshot` / `refresh` Tauri commands; backend also pushes updates via `app.emit("snapshot-updated", snapshot)`
 
-### Dev info
-- Team ID: `A6UG9Q92CB` (Personal, free Apple Developer account)
-- Build output: `~/Library/Developer/Xcode/DerivedData/ClaudeWidget-*/Build/Products/Debug/ClaudeWidgetApp.app`
-- macOS 14+ (uses `MenuBarExtra`)
+## Tauri specifics
 
-## Architecture
+- **Tray**: programmatic `TrayIconBuilder::with_id("main-tray")` in `lib.rs::run()`; left-click toggles the popup window
+- **Popup window**: borderless, transparent, alwaysOnTop, `skipTaskbar`, hidden on startup (visibility driven by tray click). Positioned under the tray icon via `tray_pos` in `TrayIconEvent::Click { rect, .. }`
+- **Main thread refresh loop**: `tauri::async_runtime::spawn` with `tokio::time::sleep(300s)` — runs on Tauri's built-in runtime, so no separate tokio runtime boilerplate needed
+- **Rate-limit backoff**: on `APIError::RateLimited`, `AppState.rate_limited_until` is set; subsequent `refresh_impl` calls short-circuit until that instant passes
 
-Single app target, unsandboxed. Three layers:
+## History (condensed)
 
-```
-┌─────────────────────────────┐
-│  MenuBarView (SwiftUI)      │  UI
-└────────────┬────────────────┘
-             │
-┌────────────▼────────────────┐
-│  UsageViewModel (@MainActor)│  state + auto-refresh loop
-└────────────┬────────────────┘
-             │
-┌────────────▼────────────────┐
-│  APIClient + KeychainReader │  service layer
-│  + SharedStore              │
-└─────────────────────────────┘
-```
+This project started as a SwiftUI `MenuBarExtra` app. After hitting friction sharing it with teammates (Xcode install + Apple Team ID setup for every new clone), we ported to Tauri. Commit history documents the old Swift version; the `src-tauri` directory is the current home.
 
-### Data flow
+Features shipped:
+- Live 5-hour + weekly + Claude Design gauges
+- Pace badge (chill / on-track / hot)
+- Account + plan header (`Claude Max 5x` etc.)
+- Headline stats tile (Today / Week tokens + favorite model)
+- macOS notifications at 50/80/95% with re-arm on reset
+- Rate-limit aware backoff
+- Auto-refresh every 5 min; on-window-open refresh if cache >60s old
 
-1. `KeychainReader.readClaudeCodeToken()` — uses `SecItemCopyMatching` on `kSecAttrService = "Claude Code-credentials"` → parses `claudeAiOauth.accessToken` from the JSON value
-2. `APIClient.fetchUsage(token:)` — `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20`
-3. `SharedStore.writeUsage(_)` — persists to `~/Library/Application Support/ClaudeWidget/usage.json`
-4. `UsageViewModel.refresh()` wires it together; invoked on launch, on 5-min timer, and via refresh button
+Features tried and removed:
+- **Burn-rate ETA** — noise (false alarms early in a window)
+- **History sparkline** — flat lines weren't informative
+- **Per-model breakdown (Opus vs Sonnet tiles)** — misleading; those fields are sub-cap pools, not per-model usage
 
-## Tech stack
+## Known limits / next up
 
-- Swift 5.9 / SwiftUI `MenuBarExtra` (macOS 14+)
-- XcodeGen generates `.xcodeproj` from `project.yml`
-- No third-party Swift packages
+- No proper tray icon artwork (uses default app icon; should be a template PNG for macOS menu bar)
+- No wake-from-sleep refresh (Swift version had this; would need `objc2` + `NSWorkspace.didWakeNotification` observer in Rust, or a poll-based timer that checks last-wake time)
+- No code signing → Gatekeeper prompt on first launch
 
-## Repo layout
+## References
 
-```
-claude-widget/
-├── CLAUDE.md                           ← this file
-├── project.yml                         ← XcodeGen spec
-├── .gitignore
-├── Shared/
-│   ├── Models/UsageResponse.swift      ← API response model
-│   └── Services/
-│       ├── APIClient.swift             ← Anthropic OAuth usage endpoint
-│       ├── KeychainReader.swift        ← SecItemCopyMatching for Claude Code token
-│       ├── SharedStore.swift           ← usage.json persistence
-│       └── UsageFormatting.swift       ← pace zones, duration formatter
-└── App/
-    ├── ClaudeWidgetApp.swift           ← @main / MenuBarExtra
-    ├── MenuBarView.swift               ← dropdown UI
-    ├── UsageViewModel.swift            ← @ObservableObject, auto-refresh
-    └── Info.plist                      ← LSUIElement = true
-```
+- Tauri v2 tray docs: https://v2.tauri.app/learn/system-tray/
+- `tauri-plugin-notification`: https://v2.tauri.app/plugin/notification/
+- SvelteKit as SPA for Tauri: https://v2.tauri.app/start/frontend/sveltekit/
 
-## Roadmap
+## Conventions
 
-### Shipped
-1. ✅ Setup — Xcode, XcodeGen, signing
-2. ✅ API client + Keychain pipeline
-3. ✅ Menu bar app with gauges + auto-refresh
-4. ✅ Simplified to menu-bar-only (dropped widget target)
-5. ❌ **Opus vs Sonnet split** — built and reverted. The `seven_day_opus` / `seven_day_sonnet` fields are per-model **sub-cap** meters (plan-specific throttles), not per-model *usage* meters. On Pro they're almost always null; showing them was misleading. Only `five_hour` + `seven_day` are meaningful gauges.
-6. ✅ **Smart alerts** — macOS notifications at 50/80/95% for 5-hour + weekly; re-arm on window reset; tracked via `UserDefaults` keys `alerts.<scope>.lastReset` and `alerts.<scope>.fired`
-7. ❌ **Burn-rate ETA** — built then removed. Signal proved noisy in practice (false "will hit cap" alarms early in a window; "gathering…" state dominated the UI). `SampleStore` + `BurnRateCalculator` deleted to keep the app focused on *current state* rather than speculative projection.
-8. ✅ **Account + plan header** — hit `/api/oauth/profile`, render `displayName · Claude Max 5x` above the gauges; flag non-`active` subscription status with an orange pill
-9. ✅ **Headline stats tile** — `StatsService` walks `~/.claude/projects/**/*.jsonl`, sums `input+output+cache_creation` tokens from `assistant` events in the last 7 days; dropdown shows a 3-tile row: `Today` / `Week` / `Favorite model`
-10. ✅ **Wake-aware refresh** — subscribes to `NSWorkspace.didWakeNotification` to restart the auto-refresh loop and force-refetch after lid close/open; also refreshes on dropdown open if data is >60s stale
-11. ✅ **Claude Design (omelette) gauge** — `UsageResponse.sevenDayOmelette` exposes the Claude Design weekly quota (API calls it by the codename `seven_day_omelette`); rendered as a third gauge when non-null; included in smart-alert thresholds
-
-8. ❌ **History sparkline** — built then removed. With short sample spans and usage values that change slowly, a flat line 28pt tall wasn't a useful signal. `SampleStore` still collects data (burn-rate ETA depends on it); only the UI was dropped.
-9. ✅ **Burn-rate reset-awareness** — each `UsageSample` now carries its `fiveHourResetsAt` / `sevenDayResetsAt`; `recomputeBurn` filters to samples matching the current window. Also: `safeBufferSeconds` (15 min) prevents "ETA lands right at reset" false alarms.
-
-### Next up (pick any)
-- ⏳ **Launch at login** — `SMAppService` registration
-- ⏳ **Per-project breakdown** — parse `~/.claude/projects/*/session.json`
-- ⏳ **Polish** — app icon, about dialog, proper install to `/Applications`
-
-## Key references
-
-- **Anthropic OAuth endpoints** (all undocumented, internal to Claude Code/Claude.ai):
-  - `GET /api/oauth/usage` — 5-hour + weekly utilization + per-model sub-cap pools. Named fields: `seven_day_opus`, `seven_day_sonnet`, `seven_day_omelette` (Claude Design). Codename-only fields: `iguana_necktie`, `omelette_promotional`, `seven_day_cowork`, `seven_day_oauth_apps` — all null for this user.
-  - `GET /api/oauth/profile` — account (name, email, `has_claude_max`), organization (`organization_type`, `rate_limit_tier`, `subscription_status`), application info
-  - `GET /api/oauth/account` — 35 KB verbose dump (org settings, model config, capabilities). Too much to be useful; not used by the app.
-  - Headers for all: `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, `User-Agent: claude-code/<ver>`
-- **Keychain**: `kSecClass = kSecClassGenericPassword`, `kSecAttrService = "Claude Code-credentials"`. Value is JSON blob; extract `claudeAiOauth.accessToken`
-
-## Working conventions
-
-- Source of truth for architecture lives here. Update when decisions change.
-- Prefer small, focused commits.
-- No comments in code unless a non-obvious *why* is needed.
+- No comments in code unless a non-obvious *why* is needed
+- Snake_case JSON across the Rust/TS boundary (no camelCase transform — keeps types mechanical)
+- All disk cache goes to `~/Library/Application Support/ClaudeMonitor/`

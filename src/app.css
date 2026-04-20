@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-accent: oklch(0.62 0.21 259);
+}
+
+html, body {
+  background: transparent;
+  color-scheme: light dark;
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: light-dark(#000, #fff);
+}

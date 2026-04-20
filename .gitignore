@@ -1,38 +1,35 @@
-# Xcode
+# Node / SvelteKit / Vite
+node_modules/
+/build/
+/.svelte-kit/
+/package/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.p12
+*.cer
+*.key
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude Code project-local state
+.claude/
+
+# Legacy Swift artifacts (kept so `git pull` from old branches stays clean)
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/
-*.xcuserstate
 DerivedData/
-build/
-
-# XcodeGen
-# (project.yml is checked in; the generated .xcodeproj is not)
-
-# Swift Package Manager
-.build/
-Packages/
-Package.resolved
-.swiftpm/
-
-# macOS
-.DS_Store
-
-# IDE
-.idea/
-.vscode/
-
-# Secrets / local config
-*.p12
-*.mobileprovision
-*.cer
-*.key
-.env
-.env.*
-
-# Claude Code local state (project-scoped settings, hooks, caches)
-.claude/
-
-# Local overrides
-project.local.yml
-*.local.yml
