@@ -9,7 +9,7 @@ mod types;
 use commands::AppState;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow, WindowEvent};
+use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow};
 
 const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray@2x.png");
 
@@ -55,18 +55,12 @@ pub fn run() {
             });
 
             if let Some(win) = app.get_webview_window("main") {
-                // Popup follows the user across Spaces *and* appears over full-screen apps.
                 let _ = win.set_visible_on_all_workspaces(true);
                 #[cfg(target_os = "macos")]
-                set_panel_behavior(&win);
-
-                // Hide the popup when it loses focus (click outside to dismiss).
-                let win_for_events = win.clone();
-                win.on_window_event(move |event| {
-                    if let WindowEvent::Focused(false) = event {
-                        let _ = win_for_events.hide();
-                    }
-                });
+                {
+                    set_panel_behavior(&win);
+                    install_global_click_monitor(win.clone());
+                }
             }
 
             // Seed the tray label from whatever we have cached so it's not blank on launch.
@@ -121,15 +115,19 @@ fn set_panel_behavior(win: &WebviewWindow) {
     }
 
     unsafe {
-        // Convert NSWindow → NSPanel. Plain NSWindow cannot reliably overlay fullscreen
-        // apps on modern macOS regardless of collectionBehavior/level. NSPanel can.
-        // We deliberately leave `nonactivatingPanel` off so the panel becomes key on show
-        // and loses key when the user clicks elsewhere — that drives our dismiss logic.
+        // Convert NSWindow → NSPanel so the window can overlay fullscreen apps.
         let panel_class: *const objc2::runtime::AnyClass = objc2::class!(NSPanel);
         let raw_obj = ptr as *mut AnyObject;
         objc2::ffi::object_setClass(raw_obj, panel_class.cast());
 
         let ns_window = &*(ptr as *mut NSWindow);
+
+        // Nonactivating panel: don't steal focus from whatever app is frontmost. This is
+        // what actually keeps the panel alive over a fullscreen app. The cost is that
+        // `Focused(false)` never fires (the panel never gained key), so we dismiss via
+        // a global NSEvent click monitor installed at startup.
+        let current_mask: usize = objc2::msg_send![ns_window, styleMask];
+        let _: () = objc2::msg_send![ns_window, setStyleMask: current_mask | (1usize << 7)];
 
         let extra = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
@@ -137,6 +135,34 @@ fn set_panel_behavior(win: &WebviewWindow) {
         ns_window.setCollectionBehavior(extra);
 
         let _: () = objc2::msg_send![ns_window, setLevel: 1000isize];
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install_global_click_monitor(win: WebviewWindow) {
+    use block2::RcBlock;
+    use objc2::runtime::AnyObject;
+
+    // NSEventMaskLeftMouseDown (1<<1) | NSEventMaskRightMouseDown (1<<3)
+    const MASK: u64 = (1 << 1) | (1 << 3);
+
+    let win_cb = win.clone();
+    let block = RcBlock::new(move |_event: *mut AnyObject| {
+        if win_cb.is_visible().unwrap_or(false) {
+            let _ = win_cb.hide();
+        }
+    });
+
+    unsafe {
+        let ns_event_class: *const objc2::runtime::AnyClass = objc2::class!(NSEvent);
+        let _monitor: *mut AnyObject = objc2::msg_send![
+            ns_event_class,
+            addGlobalMonitorForEventsMatchingMask: MASK,
+            handler: &*block
+        ];
+        // Keep the block alive for the lifetime of the app — we install this once,
+        // and the monitor lives until termination.
+        std::mem::forget(block);
     }
 }
 
