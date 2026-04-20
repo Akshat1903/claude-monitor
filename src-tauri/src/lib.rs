@@ -174,45 +174,65 @@ fn install_global_click_monitor(win: WebviewWindow) {
 }
 
 fn position_under_tray(win: &WebviewWindow, tray_rect: Rect) {
-    // Anchor the popup's top edge just below the tray icon's bottom. Using the tray
-    // rect directly (not a hardcoded Y) is essential for multi-display setups — the
-    // tray's rect is in global screen coords and sits on whichever display the tray
-    // was clicked on.
+    // Tray rects come back in the PHYSICAL pixel coordinate system of the tray's
+    // own display — not the window's current display. So we can't use
+    // win.scale_factor(): we have to find which monitor contains the tray and use
+    // THAT monitor's scale to convert to logical coords.
     const GAP: f64 = 4.0;
-    let size = win.outer_size().unwrap_or(tauri::PhysicalSize::new(340, 460));
-    let scale = win.scale_factor().unwrap_or(1.0);
+    const WIN_W: f64 = 340.0; // logical, from tauri.conf.json
 
-    match (tray_rect.position, tray_rect.size) {
-        (Position::Physical(p), Size::Physical(s)) => {
-            let tray_center_x = p.x as f64 + (s.width as f64) / 2.0;
-            let x = tray_center_x - (size.width as f64 / 2.0);
-            let y = p.y as f64 + s.height as f64 + GAP * scale;
-            let _ = win.set_position(PhysicalPosition::new(x, y));
-        }
+    let (tray_x_p, tray_y_p, tray_w_p, tray_h_p) = match (tray_rect.position, tray_rect.size) {
+        (Position::Physical(p), Size::Physical(s)) => (
+            p.x as f64,
+            p.y as f64,
+            s.width as f64,
+            s.height as f64,
+        ),
         (Position::Logical(p), Size::Logical(s)) => {
-            let tray_center_x = p.x + s.width / 2.0;
-            let logical_w = size.width as f64 / scale;
-            let x = tray_center_x - logical_w / 2.0;
+            let cx = p.x + s.width / 2.0;
+            let x = cx - WIN_W / 2.0;
             let y = p.y + s.height + GAP;
             let _ = win.set_position(LogicalPosition::new(x, y));
+            return;
         }
-        // Mixed variants shouldn't happen, but fall back to centering under the position.
-        _ => {
-            let pos: Position = tray_rect.position;
-            match pos {
-                Position::Physical(p) => {
-                    let _ = win.set_position(PhysicalPosition::new(
-                        p.x as f64 - (size.width as f64 / 2.0),
-                        p.y as f64 + 28.0 * scale,
-                    ));
-                }
-                Position::Logical(p) => {
-                    let _ = win.set_position(LogicalPosition::new(
-                        p.x - (size.width as f64 / scale) / 2.0,
-                        p.y + 28.0,
-                    ));
-                }
-            }
-        }
-    }
+        _ => return,
+    };
+
+    // Look up the tray's display by testing which monitor's physical rectangle
+    // contains the tray's physical top-left.
+    let app = win.app_handle();
+    let monitors = app.available_monitors().unwrap_or_default();
+    let target = monitors.iter().find(|m| {
+        let mp = m.position();
+        let ms = m.size();
+        let mx = mp.x as f64;
+        let my = mp.y as f64;
+        let mw = ms.width as f64;
+        let mh = ms.height as f64;
+        tray_x_p >= mx && tray_x_p < mx + mw && tray_y_p >= my && tray_y_p < my + mh
+    });
+    let target_scale = target.map(|m| m.scale_factor()).unwrap_or(1.0);
+
+    // Convert tray rect to logical using the target monitor's scale.
+    let tray_x = tray_x_p / target_scale;
+    let tray_y = tray_y_p / target_scale;
+    let tray_w = tray_w_p / target_scale;
+    let tray_h = tray_h_p / target_scale;
+
+    let tray_center_x = tray_x + tray_w / 2.0;
+    let x = tray_center_x - WIN_W / 2.0;
+    let y = tray_y + tray_h + GAP;
+
+    eprintln!(
+        "[pos] tray_phys=({:.0},{:.0})+{:.0}x{:.0} target_scale={} win_scale={} → win_log=({:.0},{:.0})",
+        tray_x_p,
+        tray_y_p,
+        tray_w_p,
+        tray_h_p,
+        target_scale,
+        win.scale_factor().unwrap_or(1.0),
+        x,
+        y
+    );
+    let _ = win.set_position(LogicalPosition::new(x, y));
 }
