@@ -1,0 +1,38 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# XcodeGen
+# (project.yml is checked in; the generated .xcodeproj is not)
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Secrets / local config
+*.p12
+*.mobileprovision
+*.cer
+*.key
+.env
+.env.*
+
+# Claude Code local state (project-scoped settings, hooks, caches)
+.claude/
+
+# Local overrides
+project.local.yml
+*.local.yml
