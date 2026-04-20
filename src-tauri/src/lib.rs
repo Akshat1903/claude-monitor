@@ -90,10 +90,17 @@ fn toggle_window(app: &tauri::AppHandle, tray_rect: Option<Rect>) {
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
     } else {
+        // Position once so the window starts roughly in the right place, then again
+        // after show() so we recompute using the target display's scale factor and
+        // outer_size. Without the second pass, the first click on a secondary display
+        // lands at stale coordinates (based on the primary's scale).
         if let Some(rect) = tray_rect {
             position_under_tray(&win, rect);
         }
         let _ = win.show();
+        if let Some(rect) = tray_rect {
+            position_under_tray(&win, rect);
+        }
         let _ = win.set_focus();
         #[cfg(target_os = "macos")]
         set_panel_behavior(&win);
