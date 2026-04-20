@@ -175,11 +175,16 @@ This spins up Vite on localhost:1420 and rebuilds Rust on save. Frontend changes
 
 - Tauri ships a single binary: Rust backend + webview that loads our Svelte bundle
 - On launch, the Rust backend reads the Claude Code OAuth token from the Keychain via `/usr/bin/security`
-- Every 5 minutes (and on window open), it hits:
-  - `GET https://api.anthropic.com/api/oauth/usage` → the quota gauges
+- The API is queried on three triggers only:
+  1. **App startup** (first fetch)
+  2. **Every 5 minutes** — a background `tokio::time::sleep(300s)` loop
+  3. **Manual refresh button** (↻ in the popup header)
+- Opening the popup *does not* trigger a fetch — it reads the most recent cached snapshot
+- Endpoints hit:
+  - `GET https://api.anthropic.com/api/oauth/usage` → quota gauges
   - `GET https://api.anthropic.com/api/oauth/profile` → account + plan tier
-- The token/response cache lives at `~/Library/Application Support/ClaudeMonitor/`
-- The Svelte frontend calls into Rust via Tauri `invoke()` for `refresh` and `get_snapshot`; backend pushes updates via an `emit("snapshot-updated")` event
+- Response cache lives at `~/Library/Application Support/ClaudeMonitor/`
+- Svelte frontend calls into Rust via Tauri `invoke()` for `refresh` and `get_snapshot`; backend pushes updates via `emit("snapshot-updated")`
 - Today / Week token counts come from walking `~/.claude/projects/**/*.jsonl` locally — nothing leaves your machine for that
 
 ## Architecture
