@@ -101,29 +101,54 @@ fn toggle_window(app: &tauri::AppHandle, tray_pos: Option<Position>) {
         }
         let _ = win.show();
         let _ = win.set_focus();
+        #[cfg(target_os = "macos")]
+        set_panel_behavior(&win);
     }
 }
 
 #[cfg(target_os = "macos")]
 fn set_panel_behavior(win: &WebviewWindow) {
+    use objc2::runtime::AnyObject;
     use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
-    let Ok(ptr) = win.ns_window() else { return };
+
+    let Ok(ptr) = win.ns_window() else {
+        eprintln!("[panel] ns_window() returned Err");
+        return;
+    };
     if ptr.is_null() {
+        eprintln!("[panel] ns_window() returned null");
         return;
     }
+
     unsafe {
+        // Convert NSWindow → NSPanel. Plain NSWindow cannot reliably overlay fullscreen
+        // apps on modern macOS regardless of collectionBehavior/level. NSPanel can.
+        let panel_class: *const objc2::runtime::AnyClass = objc2::class!(NSPanel);
+        let raw_obj = ptr as *mut AnyObject;
+        objc2::ffi::object_setClass(raw_obj, panel_class.cast());
+
         let ns_window = &*(ptr as *mut NSWindow);
 
-        // Spaces behavior: follow the user everywhere, including fullscreen.
-        let current = ns_window.collectionBehavior();
+        // Turn on nonactivating panel style mask (bit 7 = NSWindowStyleMask.nonactivatingPanel).
+        let current_mask: usize = objc2::msg_send![ns_window, styleMask];
+        let _: () = objc2::msg_send![ns_window, setStyleMask: current_mask | (1usize << 7)];
+
+        // Appear in every space, including fullscreen.
         let extra = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary;
-        ns_window.setCollectionBehavior(current | extra);
+        ns_window.setCollectionBehavior(extra);
 
-        // Raise above the fullscreen app's layer. NSStatusWindowLevel (25) puts us
-        // alongside the system menu bar, which is the standard altitude for tray popups.
-        let _: () = objc2::msg_send![ns_window, setLevel: 25isize];
+        // Raise above the menu bar and every fullscreen app layer.
+        let _: () = objc2::msg_send![ns_window, setLevel: 1000isize];
+
+        let behavior_now: usize = std::mem::transmute(ns_window.collectionBehavior());
+        let level_now: isize = objc2::msg_send![ns_window, level];
+        let mask_now: usize = objc2::msg_send![ns_window, styleMask];
+        eprintln!(
+            "[panel] collectionBehavior=0x{:x} level={} styleMask=0x{:x}",
+            behavior_now, level_now, mask_now
+        );
     }
 }
 
