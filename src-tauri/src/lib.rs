@@ -7,21 +7,29 @@ mod store;
 mod types;
 
 use commands::AppState;
+use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{LogicalPosition, Manager, PhysicalPosition, Position, WebviewWindow};
+
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray@2x.png");
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let state = AppState::new();
             app.manage(state.clone());
 
             let app_handle = app.handle().clone();
+            let tray_icon = Image::from_bytes(TRAY_ICON_BYTES)
+                .expect("tray icon should decode");
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Claude Monitor")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .icon_as_template(true)
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
